@@ -1,0 +1,43 @@
+erDiagram
+    POLLS ||--o{ POLL_OPTIONS : "имеет"
+    POLLS ||--o{ POLL_CHATS : "опубликовано в"
+    POLLS ||--o{ VOTES : "получает"
+    POLL_OPTIONS ||--o{ VOTES : "выбран в"
+    
+    POLLS {
+        bigserial id PK
+        text title "Название голосования"
+        text description "Описание"
+        bigint creator_telegram_id "Telegram ID создателя"
+        text creator_username "Username создателя"
+        boolean is_active "Активно"
+        timestamptz created_at "Дата создания"
+        timestamptz updated_at "Дата обновления"
+        timestamptz expires_at "Дата окончания"
+    }
+    
+    POLL_OPTIONS {
+        bigserial id PK
+        bigint poll_id FK "ID голосования"
+        text option_text "Текст варианта"
+        timestamptz created_at "Дата создания"
+    }
+    
+    POLL_CHATS {
+        bigserial id PK
+        bigint poll_id FK "ID голосования"
+        bigint chat_id "ID чата Telegram"
+        bigint message_id "ID сообщения"
+    }
+    
+    VOTES {
+        bigserial id PK
+        bigint poll_id FK "ID голосования"
+        bigint option_id FK "ID варианта"
+        bigint user_telegram_id "Telegram ID пользователя"
+        text user_username "Username"
+        text user_first_name "Имя"
+        text user_last_name "Фамилия"
+        timestamptz voted_at "Дата голосования"
+    }
+

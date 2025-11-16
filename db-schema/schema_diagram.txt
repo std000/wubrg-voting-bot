@@ -1,0 +1,157 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                      СХЕМА БАЗЫ ДАННЫХ WUBRG VOTING BOT                     ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌──────────────────────────────────────┐
+│            POLLS (Голосования)        │
+├──────────────────────────────────────┤
+│ PK  id                 BIGSERIAL      │
+│     title              TEXT           │
+│     description        TEXT           │
+│     creator_telegram_id BIGINT        │◄──┐
+│     creator_username   TEXT           │   │
+│     is_active          BOOLEAN        │   │ Пользователь создает
+│     created_at         TIMESTAMPTZ    │   │ голосование
+│     updated_at         TIMESTAMPTZ    │   │
+│     expires_at         TIMESTAMPTZ    │   │
+└──────────────────────────────────────┘   │
+        │                                   │
+        │ 1                                 │
+        │                                   │
+        │ N                                 │
+        ▼                                   │
+┌──────────────────────────────────────┐   │
+│   POLL_OPTIONS (Варианты ответов)    │   │
+├──────────────────────────────────────┤   │
+│ PK  id                 BIGSERIAL      │   │
+│ FK  poll_id            BIGINT         │───┘
+│     option_text        VARCHAR(300)   │
+│     option_order       INT            │
+│     created_at         TIMESTAMP      │
+└──────────────────────────────────────┘
+        │
+        │ 1
+        │
+        │ N
+        ▼
+┌──────────────────────────────────────┐
+│      VOTES (Голоса пользователей)    │
+├──────────────────────────────────────┤
+│ PK  id                 BIGSERIAL      │
+│ FK  poll_id            BIGINT         │───┐
+│ FK  option_id          BIGINT         │   │
+│     user_telegram_id   BIGINT         │◄──┼──┐ Пользователь
+│     user_username      TEXT           │   │  │ голосует
+│     user_first_name    TEXT           │   │  │
+│     user_last_name     TEXT           │   │  │
+│     voted_at           TIMESTAMPTZ    │   │  │
+│                                       │   │  │
+│ UNIQUE (poll_id, user_telegram_id)  │   │  │
+└──────────────────────────────────────┘   │  │
+                                            │  │
+        ┌───────────────────────────────────┘  │
+        │ 1                                    │
+        │                                      │
+        │ N                                    │
+        ▼                                      │
+┌──────────────────────────────────────┐      │
+│   POLL_CHATS (Чаты с голосованиями)  │      │
+├──────────────────────────────────────┤      │
+│ PK  id                 BIGSERIAL      │      │
+│ FK  poll_id            BIGINT         │──────┘
+│     chat_id            BIGINT         │
+│     message_id         BIGINT         │
+│     chat_title         VARCHAR(500)   │
+│     chat_type          VARCHAR(50)    │
+│     posted_at          TIMESTAMP      │
+│                                       │
+│ UNIQUE (poll_id, chat_id, message_id)│
+└──────────────────────────────────────┘
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                             КЛЮЧЕВЫЕ СВЯЗИ                                   ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+1. POLLS (1) ──► (N) POLL_OPTIONS
+   - Одно голосование может иметь много вариантов ответов
+   - ON DELETE CASCADE: при удалении голосования удаляются все варианты
+
+2. POLLS (1) ──► (N) POLL_CHATS
+   - Одно голосование может быть опубликовано во многих чатах
+   - ON DELETE CASCADE: при удалении голосования удаляются все записи о чатах
+
+3. POLL_OPTIONS (1) ──► (N) VOTES
+   - Один вариант ответа может быть выбран многими пользователями
+   - ON DELETE CASCADE: при удалении варианта удаляются все связанные голоса
+
+4. POLLS (1) ──► (N) VOTES
+   - Одно голосование может иметь много голосов
+   - ON DELETE CASCADE: при удалении голосования удаляются все голоса
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                           ИНДЕКСЫ ДЛЯ ОПТИМИЗАЦИИ                           ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+POLLS:
+  - idx_polls_creator           ON (creator_telegram_id)
+  - idx_polls_is_active         ON (is_active)
+  - idx_polls_created_at        ON (created_at DESC)
+
+POLL_OPTIONS:
+  - idx_poll_options_poll_id    ON (poll_id)
+
+POLL_CHATS:
+  - idx_poll_chats_poll_id      ON (poll_id)
+  - idx_poll_chats_chat_id      ON (chat_id)
+  - idx_poll_chats_message_id   ON (chat_id, message_id)
+
+VOTES:
+  - idx_votes_poll_id           ON (poll_id)
+  - idx_votes_option_id         ON (option_id)
+  - idx_votes_user_telegram_id  ON (user_telegram_id)
+  - idx_votes_voted_at          ON (voted_at DESC)
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                         УНИКАЛЬНЫЕ ОГРАНИЧЕНИЯ                               ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+POLL_CHATS:
+  - unique_poll_chat_message: (poll_id, chat_id, message_id)
+    Голосование может быть опубликовано в чате только один раз
+
+VOTES:
+  - unique_vote_per_user_option: (poll_id, user_telegram_id)
+    Пользователь может проголосовать в голосовании только один раз
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                          ТИПИЧНЫЕ СЦЕНАРИИ                                   ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+1. СОЗДАНИЕ ГОЛОСОВАНИЯ:
+   └─► INSERT в POLLS
+       └─► INSERT в POLL_OPTIONS (несколько записей)
+
+2. ПУБЛИКАЦИЯ ГОЛОСОВАНИЯ В ЧАТ:
+   └─► INSERT в POLL_CHATS
+
+3. ГОЛОСОВАНИЕ ПОЛЬЗОВАТЕЛЯ:
+   └─► CHECK: уже голосовал? (SELECT из VOTES)
+       └─► Если нет: INSERT в VOTES
+       └─► Если да и multiple_answers=true: INSERT в VOTES (другой option_id)
+       └─► Если да и multiple_answers=false: ERROR или UPDATE
+
+4. ПОЛУЧЕНИЕ РЕЗУЛЬТАТОВ:
+   └─► SELECT с JOIN между POLL_OPTIONS и VOTES
+       └─► GROUP BY option_id
+       └─► COUNT(*) для подсчета голосов
+
+5. ЗАКРЫТИЕ ГОЛОСОВАНИЯ:
+   └─► UPDATE POLLS SET is_active = false
+
+6. УДАЛЕНИЕ ГОЛОСОВАНИЯ:
+   └─► DELETE FROM POLLS (каскадно удалит OPTIONS, VOTES, POLL_CHATS)
+

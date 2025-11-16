@@ -274,6 +274,7 @@ MIT License - см. [LICENSE](LICENSE) файл
 ## 👥 Авторы
 
 - Ваше имя - начальная разработка
+  Initial development assisted by Claude (Anthropic)
 
 ## 🙏 Благодарности
 

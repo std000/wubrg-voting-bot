@@ -512,7 +512,8 @@ func (b *Bot) handleVote(c telebot.Context) error {
 		`INSERT INTO voting.votes (poll_id, option_id, user_telegram_id, user_username, user_first_name, user_last_name)
 		 VALUES ($1, $2, $3, $4, $5, $6)
 		 ON CONFLICT (poll_id, user_telegram_id) 
-		 DO UPDATE SET option_id = $2, voted_at = NOW()`,
+		 DO UPDATE SET option_id = EXCLUDED.option_id, voted_at = NOW()
+		 WHERE votes.option_id != EXCLUDED.option_id`,
 		pollID, optionID, user.ID, user.Username, user.FirstName, user.LastName)
 	if err != nil {
 		log.Printf("❌ Ошибка сохранения голоса: %v", err)

@@ -11,7 +11,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+var Version = "dev"
+
 func main() {
+	// Проверка флага --version
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		fmt.Println(Version)
+		return
+	}
+
+	fmt.Printf("🚀 WUBRG Voting Bot версия %s\n", Version)
 	// Строка подключения к PostgreSQL
 	// Формат: postgresql://username:password@localhost:5432/database_name
 	databaseURL := os.Getenv("DATABASE_URL")

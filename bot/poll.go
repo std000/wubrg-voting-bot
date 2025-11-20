@@ -227,16 +227,18 @@ type PollData struct {
 	TotalVotes int
 }
 
-// handleListPolls показывает список активных голосований
+// handleListPolls показывает список активных голосований пользователя
 func (b *Bot) handleListPolls(c telebot.Context) error {
 	ctx := context.Background()
+	userID := c.Sender().ID
 
 	rows, err := b.db.Query(ctx,
 		`SELECT id, title, created_at 
 		 FROM voting.polls 
-		 WHERE is_active = true 
+		 WHERE is_active = true AND creator_telegram_id = $1
 		 ORDER BY created_at DESC 
-		 LIMIT 10`)
+		 LIMIT 10`,
+		userID)
 	if err != nil {
 		log.Printf("❌ Ошибка получения списка голосований: %v", err)
 		return c.Send("❌ Ошибка получения списка голосований")
@@ -263,10 +265,10 @@ func (b *Bot) handleListPolls(c telebot.Context) error {
 	}
 
 	if len(polls) == 0 {
-		return c.Send("📊 Нет активных голосований.\n\nИспользуйте /createpoll чтобы создать новое.")
+		return c.Send("📊 У вас нет активных голосований.\n\nИспользуйте /createpoll чтобы создать новое.")
 	}
 
-	msg := "📊 Список активных голосований:\n\n"
+	msg := "📊 Ваши активные голосования:\n\n"
 	for i, poll := range polls {
 		msg += fmt.Sprintf("%d. %s\n   🆔 ID: %d | 📅 %s\n\n",
 			i+1, poll.Title, poll.ID, poll.CreatedAt.Format("02.01.2006 15:04"))
@@ -436,6 +438,23 @@ func (b *Bot) handlePublishPoll(c telebot.Context) error {
 	}
 
 	ctx := context.Background()
+	userID := c.Sender().ID
+
+	// Проверяем, что пользователь является владельцем голосования
+	var creatorID int64
+	err = b.db.QueryRow(ctx,
+		`SELECT creator_telegram_id FROM voting.polls WHERE id = $1 AND is_active = true`,
+		pollID).Scan(&creatorID)
+	if err != nil {
+		log.Printf("❌ Ошибка проверки владельца голосования: %v", err)
+		return c.Send("❌ Голосование не найдено или не активно")
+	}
+
+	if creatorID != userID {
+		log.Printf("⚠️ Пользователь %d попытался опубликовать чужое голосование %d (владелец: %d)", userID, pollID, creatorID)
+		return c.Send("❌ Вы можете публиковать только свои голосования.\n\nПосмотрите список своих голосований: /listpolls")
+	}
+
 	poll, err := b.getPollData(ctx, pollID)
 	if err != nil {
 		log.Printf("❌ Ошибка получения данных голосования: %v", err)

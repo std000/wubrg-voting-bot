@@ -65,9 +65,19 @@ CREATE TABLE IF NOT EXISTS voting.votes (
 CREATE INDEX IF NOT EXISTS idx_votes_poll_id ON voting.votes(poll_id);
 CREATE INDEX IF NOT EXISTS idx_votes_option_id ON voting.votes(option_id);
 
+-- Таблица логирования всех нажатий на кнопки (append-only)
+CREATE TABLE IF NOT EXISTS voting.vote_log (
+    id BIGSERIAL PRIMARY KEY,
+    user_telegram_id BIGINT NOT NULL,             -- Telegram ID пользователя
+    poll_id BIGINT NOT NULL,                      -- ID голосования
+    option_id BIGINT NOT NULL,                    -- ID выбранного варианта
+    clicked_at TIMESTAMPTZ NOT NULL DEFAULT NOW() -- Время нажатия на кнопку
+);
+
 -- Комментарии к таблицам
 COMMENT ON TABLE voting.polls IS 'Таблица голосований';
 COMMENT ON TABLE voting.poll_options IS 'Варианты ответов для голосований';
 COMMENT ON TABLE voting.poll_chats IS 'Чаты, куда были опубликованы голосования';
 COMMENT ON TABLE voting.votes IS 'Голоса пользователей';
+COMMENT ON TABLE voting.vote_log IS 'Лог всех нажатий на кнопки голосования (append-only, без индексов)';
 

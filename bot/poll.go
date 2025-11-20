@@ -526,6 +526,16 @@ func (b *Bot) handleVote(c telebot.Context) error {
 	}
 	defer tx.Rollback(ctx)
 
+	// Логируем нажатие на кнопку в vote_log (append-only) - в самом начале транзакции
+	_, err = tx.Exec(ctx,
+		`INSERT INTO voting.vote_log (user_telegram_id, poll_id, option_id)
+		 VALUES ($1, $2, $3)`,
+		user.ID, pollID, optionID)
+	if err != nil {
+		log.Printf("❌ Ошибка записи в vote_log: %v", err)
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Ошибка логирования"})
+	}
+
 	// Сохраняем или обновляем голос
 	_, err = tx.Exec(ctx,
 		`INSERT INTO voting.votes (poll_id, option_id, user_telegram_id, user_username, user_first_name, user_last_name)

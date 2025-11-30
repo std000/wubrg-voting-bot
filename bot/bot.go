@@ -69,6 +69,9 @@ func (b *Bot) registerHandlers() {
 	// Обработчик inline-запросов
 	b.bot.Handle(telebot.OnQuery, b.handleInlineQuery)
 
+	// Обработчик выбора inline-результата (когда пользователь отправляет голосование в чат)
+	b.bot.Handle(telebot.OnInlineResult, b.handleChosenInlineResult)
+
 	// Обработчик текстовых сообщений (с учетом состояния диалога)
 	b.bot.Handle(telebot.OnText, b.handleText)
 }

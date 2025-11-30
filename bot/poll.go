@@ -770,3 +770,58 @@ func (b *Bot) handleInlineQuery(c telebot.Context) error {
 		CacheTime: 10, // Кешировать на 10 секунд
 	})
 }
+
+// handleChosenInlineResult обрабатывает событие выбора inline-результата
+// (когда пользователь отправляет голосование в чат через inline-режим)
+func (b *Bot) handleChosenInlineResult(c telebot.Context) error {
+	// Пытаемся получить InlineResult из контекста
+	result := c.InlineResult()
+	if result == nil {
+		log.Printf("⚠️ InlineResult is nil")
+		return nil
+	}
+
+	// ResultID содержит pollID (мы устанавливали его в handleInlineQuery)
+	pollID, err := strconv.ParseInt(result.ResultID, 10, 64)
+	if err != nil {
+		log.Printf("❌ Ошибка парсинга poll ID из inline result: %v", err)
+		return nil
+	}
+
+	// InlineMessageID - уникальный идентификатор inline-сообщения
+	inlineMessageID := result.MessageID
+	if inlineMessageID == "" {
+		log.Printf("⚠️ InlineMessageID пустой для poll_id=%d", pollID)
+		return nil
+	}
+
+	ctx := context.Background()
+
+	// Сохраняем информацию об отправке inline-голосования
+	_, err = b.db.Exec(ctx,
+		`INSERT INTO voting.poll_chats (poll_id, inline_message_id, message_hash, created_at) 
+		 VALUES ($1, $2, $3, NOW())
+		 ON CONFLICT (poll_id, inline_message_id) WHERE inline_message_id IS NOT NULL 
+		 DO NOTHING`,
+		pollID, inlineMessageID, uint64(0))
+	if err != nil {
+		log.Printf("❌ Ошибка сохранения inline-публикации в poll_chats: %v", err)
+		return nil
+	}
+
+	log.Printf("✅ Inline-голосование %d отправлено пользователем %d (inline_msg_id=%s, hash=%d)",
+		pollID, c.Sender().ID, inlineMessageID, uint64(0))
+
+	return nil
+}
+
+// FastHash быстрая хеш-функция для строк
+func FastHash(s string) uint64 {
+	var h uint64 = 146527 // random prime-ish
+
+	for i := 0; i < len(s); i++ {
+		h = (h * 31) ^ uint64(s[i])
+	}
+
+	return h
+}

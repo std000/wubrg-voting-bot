@@ -154,8 +154,17 @@ wubrg-voting-bot/
 - `voting.poll_options` - варианты ответов
 - `voting.votes` - голоса пользователей
 - `voting.poll_chats` - чаты с опубликованными голосованиями
+  - Поддерживает обычные публикации (`chat_id`, `message_id`)
+  - Поддерживает inline-публикации (`inline_message_id`, `message_hash`)
+- `voting.vote_log` - лог всех нажатий на кнопки (append-only)
 
 Подробнее: см. [db-schema/schema.sql](db-schema/schema.sql)
+
+### Миграции
+
+- [db-schema/add_vote_log_table.sql](db-schema/add_vote_log_table.sql) - Добавление таблицы логирования
+- [db-schema/add_emoji_column.sql](db-schema/add_emoji_column.sql) - Добавление поддержки эмодзи
+- [db-schema/add_inline_support_to_poll_chats.sql](db-schema/add_inline_support_to_poll_chats.sql) - Поддержка inline-публикаций (NEW!)
 
 ## 🧪 Тестирование
 
@@ -183,6 +192,8 @@ SELECT * FROM voting.votes;
 - [INTEGRATION.md](INTEGRATION.md) - Интеграция с БД
 - [TESTING.md](TESTING.md) - Тестирование
 - [db-schema/README.md](db-schema/README.md) - Документация БД
+- [db-schema/APPLY_INLINE_SUPPORT.md](db-schema/APPLY_INLINE_SUPPORT.md) - Миграция inline-поддержки (NEW!)
+- [db-schema/INLINE_SUPPORT_QUICKSTART.md](db-schema/INLINE_SUPPORT_QUICKSTART.md) - Быстрый старт inline-поддержки
 
 ## 🔧 Настройка для продакшена
 

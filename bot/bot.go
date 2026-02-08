@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -63,8 +64,8 @@ func (b *Bot) registerHandlers() {
 	// Обработчик команды /publishpoll - опубликовать голосование
 	b.bot.Handle("/publishpoll", b.handlePublishPoll)
 
-	// Обработчик callback-кнопок для голосования
-	b.bot.Handle(telebot.OnCallback, b.handleVote)
+	// Обработчик callback-кнопок (роутер)
+	b.bot.Handle(telebot.OnCallback, b.handleCallback)
 
 	// Обработчик inline-запросов
 	b.bot.Handle(telebot.OnQuery, b.handleInlineQuery)
@@ -112,6 +113,23 @@ func (b *Bot) handleStatus(c telebot.Context) error {
 		return c.Send("❌ Ошибка подключения к базе данных")
 	}
 	return c.Send("✅ База данных подключена и работает!")
+}
+
+// handleCallback роутер для callback-кнопок
+func (b *Bot) handleCallback(c telebot.Context) error {
+	data := c.Data()
+	switch {
+	case strings.HasPrefix(data, "\fvote|"):
+		return b.handleVote(c)
+	case strings.HasPrefix(data, "\fpoll_done"):
+		return b.handlePollDoneCallback(c)
+	case strings.HasPrefix(data, "\fpoll_confirm_yes"):
+		return b.handlePollConfirmYesCallback(c)
+	case strings.HasPrefix(data, "\fpoll_confirm_no"):
+		return b.handlePollConfirmNoCallback(c)
+	default:
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Неизвестная команда"})
+	}
 }
 
 // handleText обрабатывает текстовые сообщения с учетом состояния диалога

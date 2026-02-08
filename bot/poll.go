@@ -41,6 +41,108 @@ func (b *Bot) handlePollTitleInput(c telebot.Context) error {
 		"Введите первый вариант ответа:", title))
 }
 
+// optionInputMarkup возвращает inline-клавиатуру с кнопкой "Готово"
+func optionInputMarkup() *telebot.ReplyMarkup {
+	markup := &telebot.ReplyMarkup{}
+	btnDone := markup.Data("✅ Готово", "poll_done")
+	markup.Inline(markup.Row(btnDone))
+	return markup
+}
+
+// confirmPollMarkup возвращает inline-клавиатуру с кнопками "Да" и "Нет"
+func confirmPollMarkup() *telebot.ReplyMarkup {
+	markup := &telebot.ReplyMarkup{}
+	btnYes := markup.Data("✅ Да, создать", "poll_confirm_yes")
+	btnNo := markup.Data("❌ Нет, отменить", "poll_confirm_no")
+	markup.Inline(markup.Row(btnYes, btnNo))
+	return markup
+}
+
+// handlePollConfirmYesCallback обрабатывает нажатие кнопки "Да" при подтверждении
+func (b *Bot) handlePollConfirmYesCallback(c telebot.Context) error {
+	userID := c.Sender().ID
+	dialogCtx := b.dialog.GetContext(userID)
+
+	if dialogCtx.State != StateCreatePollConfirm {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Нет активного создания голосования"})
+	}
+
+	// Получаем данные голосования
+	titleInterface, _ := b.dialog.GetData(userID, "poll_title")
+	optionsInterface, _ := b.dialog.GetData(userID, "poll_options")
+
+	title := titleInterface.(string)
+	options := optionsInterface.([]string)
+
+	// Получаем username создателя
+	username := c.Sender().Username
+
+	// Сохраняем голосование в БД
+	ctx := context.Background()
+	pollID, err := b.savePollToDB(ctx, userID, username, title, options)
+	if err != nil {
+		log.Printf("❌ Ошибка сохранения голосования: %v", err)
+		c.Respond(&telebot.CallbackResponse{Text: "❌ Ошибка сохранения"})
+		return c.Send(fmt.Sprintf("❌ Ошибка при сохранении голосования: %v\n\nПопробуйте еще раз позже.", err))
+	}
+
+	log.Printf("✅ Пользователь %d создал голосование ID=%d: %s с %d вариантами", userID, pollID, title, len(options))
+
+	// Формируем сообщение об успехе
+	successMsg := "🎉 Голосование успешно создано!\n\n"
+	successMsg += fmt.Sprintf("📝 %s\n\n", title)
+	for i, option := range options {
+		successMsg += fmt.Sprintf("%d. %s\n", i+1, option)
+	}
+	successMsg += fmt.Sprintf("\n✅ Голосование сохранено в базу данных!\n🆔 ID голосования: %d\n\n", pollID)
+	successMsg += "Используйте /publishpoll " + strconv.FormatInt(pollID, 10) + " чтобы опубликовать голосование в этом чате."
+
+	b.dialog.SetState(userID, StateIdle)
+	c.Respond(&telebot.CallbackResponse{Text: "✅ Голосование создано!"})
+	return c.Send(successMsg)
+}
+
+// handlePollConfirmNoCallback обрабатывает нажатие кнопки "Нет" при подтверждении
+func (b *Bot) handlePollConfirmNoCallback(c telebot.Context) error {
+	userID := c.Sender().ID
+	dialogCtx := b.dialog.GetContext(userID)
+
+	if dialogCtx.State != StateCreatePollConfirm {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Нет активного создания голосования"})
+	}
+
+	b.dialog.ResetContext(userID)
+	c.Respond(&telebot.CallbackResponse{Text: "❌ Отменено"})
+	return c.Send("❌ Создание голосования отменено.\n\nИспользуйте /createpoll чтобы начать заново.")
+}
+
+// handlePollDoneCallback обрабатывает нажатие кнопки "Готово" при добавлении вариантов
+func (b *Bot) handlePollDoneCallback(c telebot.Context) error {
+	userID := c.Sender().ID
+	dialogCtx := b.dialog.GetContext(userID)
+
+	// Проверяем, что пользователь в нужном состоянии
+	if dialogCtx.State != StateCreatePollOption {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Нет активного создания голосования"})
+	}
+
+	// Проверяем количество вариантов
+	optionsInterface, _ := b.dialog.GetData(userID, "poll_options")
+	options := optionsInterface.([]string)
+
+	if len(options) < 2 {
+		return c.Respond(&telebot.CallbackResponse{
+			Text:      fmt.Sprintf("❌ Нужно минимум 2 варианта. Сейчас: %d", len(options)),
+			ShowAlert: true,
+		})
+	}
+
+	// Переходим к подтверждению
+	b.dialog.SetState(userID, StateCreatePollConfirm)
+	c.Respond(&telebot.CallbackResponse{})
+	return b.showPollPreview(c)
+}
+
 // handlePollOptionInput обрабатывает ввод вариантов голосования
 func (b *Bot) handlePollOptionInput(c telebot.Context) error {
 	userID := c.Sender().ID
@@ -54,9 +156,9 @@ func (b *Bot) handlePollOptionInput(c telebot.Context) error {
 		options := optionsInterface.([]string)
 
 		if len(options) < 2 {
-			return c.Send("❌ Нужно добавить минимум 2 варианта ответа.\n\n" +
-				"Текущее количество вариантов: " + strconv.Itoa(len(options)) + "\n\n" +
-				"Добавьте еще варианты или напишите 'готово' когда закончите:")
+			return c.Send("❌ Нужно добавить минимум 2 варианта ответа.\n\n"+
+				"Текущее количество вариантов: "+strconv.Itoa(len(options))+"\n\n"+
+				"Добавьте еще варианты или нажмите «Готово» когда закончите:", optionInputMarkup())
 		}
 
 		// Переходим к подтверждению
@@ -83,8 +185,8 @@ func (b *Bot) handlePollOptionInput(c telebot.Context) error {
 
 	return c.Send(fmt.Sprintf("✅ Вариант %d добавлен: \"%s\"\n\n"+
 		"Всего вариантов: %d\n\n"+
-		"Введите следующий вариант или напишите 'готово' для завершения:",
-		optionNumber, option, optionNumber))
+		"Введите следующий вариант или нажмите «Готово» для завершения:",
+		optionNumber, option, optionNumber), optionInputMarkup())
 }
 
 // showPollPreview показывает превью голосования перед созданием
@@ -107,11 +209,9 @@ func (b *Bot) showPollPreview(c telebot.Context) error {
 	}
 
 	preview += "\n━━━━━━━━━━━━━━━━━━━━\n\n" +
-		"Все верно? Напишите:\n" +
-		"✅ 'да' - создать голосование\n" +
-		"❌ 'нет' - отменить"
+		"Все верно?"
 
-	return c.Send(preview)
+	return c.Send(preview, confirmPollMarkup())
 }
 
 // savePollToDB сохраняет голосование в базу данных

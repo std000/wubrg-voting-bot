@@ -143,8 +143,6 @@ func (b *Bot) handleText(c telebot.Context) error {
 		return b.handlePollTitleInput(c)
 	case StateCreatePollOption:
 		return b.handlePollOptionInput(c)
-	case StateCreatePollConfirm:
-		return b.handlePollConfirmInput(c)
 	default:
 		// Обычный режим без диалога
 		return c.Send(fmt.Sprintf("Вы написали: %s\n\nИспользуйте /help для списка команд", c.Text()))

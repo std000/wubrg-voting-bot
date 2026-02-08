@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -10,6 +11,8 @@ import (
 
 	"gopkg.in/telebot.v4"
 )
+
+const SameMessageError = "telegram: Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message (400)"
 
 // handleCreatePoll запускает диалог создания голосования
 func (b *Bot) handleCreatePoll(c telebot.Context) error {
@@ -589,46 +592,8 @@ func (b *Bot) handleVote(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Ошибка обработки голоса"})
 	}
 
-	// Получаем обновленные данные голосования (после успешного коммита)
-	poll, err := b.getPollData(ctx, pollID)
-	if err != nil {
-		log.Printf("❌ Ошибка получения обновленных данных: %v", err)
-		return c.Respond(&telebot.CallbackResponse{Text: "✅ Ваш голос учтен!"})
-	}
-
-	// Обновляем сообщение с результатами
-	msg := formatPollMessage(poll)
-
-	// Пересоздаем кнопки
-	markup := &telebot.ReplyMarkup{}
-	rows := make([]telebot.Row, 0)
-	for _, opt := range poll.Options {
-		btn := markup.Data(opt.Text, "vote", strconv.FormatInt(pollID, 10), strconv.FormatInt(opt.ID, 10))
-		rows = append(rows, markup.Row(btn))
-	}
-	markup.Inline(rows...)
-
-	// Проверяем, является ли это inline-сообщением или обычным
-	callback := c.Callback()
-	if callback != nil && callback.MessageID != "" {
-		// Для inline-сообщений используем специальный тип
-		inlineMsg := &telebot.StoredMessage{
-			MessageID: callback.MessageID,
-		}
-		_, err = c.Bot().Edit(inlineMsg, msg, markup)
-		if err != nil {
-			log.Printf("❌ Ошибка обновления inline-сообщения: %v", err)
-		}
-	} else if c.Message() != nil {
-		// Для обычных сообщений
-		_, err = c.Bot().Edit(c.Message(), msg, markup)
-		if err != nil {
-			log.Printf("❌ Ошибка обновления сообщения: %v", err)
-		}
-	} else {
-		// Если не удалось определить тип сообщения
-		log.Printf("⚠️ Не удалось определить тип сообщения для редактирования (poll_id=%d, user_id=%d)", pollID, user.ID)
-	}
+	// Планируем обновление всех сообщений этого голосования через очередь
+	b.updateQueue.Schedule(pollID)
 
 	return c.Respond(&telebot.CallbackResponse{Text: "✅ Ваш голос учтен!"})
 }
@@ -847,6 +812,119 @@ func (b *Bot) handleChosenInlineResult(c telebot.Context) error {
 		pollID, c.Sender().ID, inlineMessageID, uint64(0))
 
 	return nil
+}
+
+// updatePollMessages обновляет все опубликованные сообщения для указанного голосования.
+// Пропускает обновление если хеш сообщения не изменился.
+// Вызывается из воркера очереди обновлений.
+func (b *Bot) updatePollMessages(pollID int64) {
+	ctx := context.Background()
+
+	// Получаем актуальные данные голосования
+	poll, err := b.getPollData(ctx, pollID)
+	if err != nil {
+		log.Printf("❌ [UpdateWorker] Ошибка получения данных голосования %d: %v", pollID, err)
+		return
+	}
+
+	// Форматируем текст и вычисляем хеш
+	msg := formatPollMessage(poll)
+	newHash := int64(FastHash(msg))
+
+	markup := &telebot.ReplyMarkup{}
+	btnRows := make([]telebot.Row, 0)
+	for _, opt := range poll.Options {
+		btn := markup.Data(opt.Text, "vote", strconv.FormatInt(pollID, 10), strconv.FormatInt(opt.ID, 10))
+		btnRows = append(btnRows, markup.Row(btn))
+	}
+	markup.Inline(btnRows...)
+
+	// Получаем все опубликованные сообщения для этого голосования (включая хеш)
+	rows, err := b.db.Query(ctx,
+		`SELECT id, chat_id, message_id, inline_message_id, message_hash FROM voting.poll_chats WHERE poll_id = $1`,
+		pollID)
+	if err != nil {
+		log.Printf("❌ [UpdateWorker] Ошибка получения чатов для голосования %d: %v", pollID, err)
+		return
+	}
+	defer rows.Close()
+
+	updated := 0
+	skipped := 0
+	for rows.Next() {
+		var rowID int64
+		var chatID *int64
+		var messageID *int64
+		var inlineMessageID *string
+		var messageHash *int64
+
+		if err := rows.Scan(&rowID, &chatID, &messageID, &inlineMessageID, &messageHash); err != nil {
+			log.Printf("❌ [UpdateWorker] Ошибка чтения данных poll_chats: %v", err)
+			continue
+		}
+
+		// Проверяем хеш — если не изменился, пропускаем обновление
+		if messageHash != nil && *messageHash == newHash {
+			skipped++
+			continue
+		}
+
+		var editErr error
+		var ok bool
+		if inlineMessageID != nil && *inlineMessageID != "" {
+			// Inline-сообщение
+			storedMsg := &telebot.StoredMessage{
+				MessageID: *inlineMessageID,
+			}
+			_, editErr = b.bot.Edit(storedMsg, msg, markup)
+			ok = CheckIsUpdatingSuccess(editErr)
+			if !ok {
+				log.Printf("❌ [UpdateWorker] Ошибка обновления inline-сообщения %s (poll=%d): %v",
+					*inlineMessageID, pollID, editErr)
+			}
+		} else if chatID != nil && messageID != nil {
+			// Обычное сообщение в чате
+			storedMsg := &telebot.StoredMessage{
+				MessageID: strconv.FormatInt(*messageID, 10),
+				ChatID:    *chatID,
+			}
+			_, editErr = b.bot.Edit(storedMsg, msg, markup)
+			ok = CheckIsUpdatingSuccess(editErr)
+			if !ok {
+				log.Printf("❌ [UpdateWorker] Ошибка обновления сообщения (chat=%d, msg=%d, poll=%d): %v",
+					*chatID, *messageID, pollID, editErr)
+			}
+		} else {
+			continue
+		}
+
+		// После успешного обновления сохраняем новый хеш
+		if ok {
+			_, err = b.db.Exec(ctx,
+				`UPDATE voting.poll_chats SET message_hash = $1 WHERE id = $2`,
+				newHash, rowID)
+			if err != nil {
+				log.Printf("❌ [UpdateWorker] Ошибка сохранения хеша для poll_chats id=%d: %v", rowID, err)
+			}
+			updated++
+		}
+	}
+
+	log.Printf("✅ [UpdateWorker] Голосование %d: обновлено %d, пропущено %d (хеш не изменился)", pollID, updated, skipped)
+}
+
+func CheckIsUpdatingSuccess(editErr error) bool {
+	if editErr == nil {
+		return true
+	}
+	if errors.Is(editErr, telebot.ErrTrueResult) {
+		return true
+	}
+	if editErr.Error() == SameMessageError {
+		return true
+	}
+
+	return false
 }
 
 // FastHash быстрая хеш-функция для строк

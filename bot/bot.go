@@ -12,9 +12,10 @@ import (
 )
 
 type Bot struct {
-	bot    *telebot.Bot
-	db     *pgxpool.Pool
-	dialog *DialogManager
+	bot         *telebot.Bot
+	db          *pgxpool.Pool
+	dialog      *DialogManager
+	updateQueue *UpdateQueue
 }
 
 // New создает и настраивает новый экземпляр бота
@@ -30,9 +31,10 @@ func New(token string, db *pgxpool.Pool) (*Bot, error) {
 	}
 
 	b := &Bot{
-		bot:    tgBot,
-		db:     db,
-		dialog: NewDialogManager(),
+		bot:         tgBot,
+		db:          db,
+		dialog:      NewDialogManager(),
+		updateQueue: NewUpdateQueue(),
 	}
 
 	// Регистрация обработчиков
@@ -162,8 +164,22 @@ func (b *Bot) handleCancel(c telebot.Context) error {
 	return c.Send("✅ Диалог отменен. Вы вернулись в обычный режим.")
 }
 
+// startUpdateWorker запускает горутину-воркер для обработки очереди обновлений
+func (b *Bot) startUpdateWorker() {
+	go func() {
+		log.Println("📨 [UpdateWorker] Воркер обновления сообщений запущен")
+		for range b.updateQueue.notify {
+			polls := b.updateQueue.drain()
+			for _, pollID := range polls {
+				b.updatePollMessages(pollID)
+			}
+		}
+	}()
+}
+
 // Start запускает бота
 func (b *Bot) Start() {
 	log.Println("🤖 Бот начал прослушивание сообщений...")
+	b.startUpdateWorker()
 	b.bot.Start()
 }

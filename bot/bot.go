@@ -81,6 +81,12 @@ func (b *Bot) registerHandlers() {
 
 // handleStart обрабатывает команду /start
 func (b *Bot) handleStart(c telebot.Context) error {
+	// Проверяем deep-link параметр (например, /start createpoll)
+	payload := c.Message().Payload
+	if payload == "createpoll" {
+		return b.handleCreatePoll(c)
+	}
+
 	return c.Send("👋 Привет! Я бот для голосования WUBRG.\n\nИспользуй /help чтобы узнать доступные команды.")
 }
 

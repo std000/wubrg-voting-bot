@@ -600,20 +600,10 @@ func (b *Bot) handleVote(c telebot.Context) error {
 
 // handleInlineQuery обрабатывает inline-запросы (@bot_name)
 func (b *Bot) handleInlineQuery(c telebot.Context) error {
-	query := c.Query()
-
 	// Кнопка "Создать голосование" — всегда отображается над результатами
 	createPollButton := &telebot.QueryResponseButton{
 		Text:  "📊 Создать голосование",
 		Start: "createpoll",
-	}
-
-	if query.Text != "vote" {
-		return c.Answer(&telebot.QueryResponse{
-			Results:   telebot.Results{},
-			CacheTime: 10,
-			Button:    createPollButton,
-		})
 	}
 
 	ctx := context.Background()
